@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Scena — il pianificatore della tua serata cinematografica. Sceglie al massimo tre titoli dalla tua libreria e spiega perché.">
+  <meta name="theme-color" content="#FCFAF5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121419" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+
+  <!-- iOS / PWA -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Scena">
+  <link rel="apple-touch-icon" href="icons/Icon-180.png">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <title>Scena — la tua serata cinematografica</title>
+
+  <style>
+    :root {
+      color-scheme: light dark;
+      --scena-bg: #FCFAF5;
+      --scena-fg: #1C1B18;
+      --scena-muted: #6B675E;
+      --scena-gold: #B98918;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --scena-bg: #121419;
+        --scena-fg: #EAE6DC;
+        --scena-muted: #A6A196;
+        --scena-gold: #EAC35D;
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--scena-bg);
+      color: var(--scena-fg);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    #scena-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background:
+        radial-gradient(circle at 70% 20%, rgba(232, 201, 108, 0.20), transparent 42%),
+        radial-gradient(circle at 20% 85%, rgba(74, 94, 138, 0.16), transparent 45%),
+        var(--scena-bg);
+      transition: opacity 240ms ease;
+    }
+
+    #scena-splash.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #scena-splash img {
+      width: 84px;
+      height: 84px;
+      border-radius: 24px;
+      box-shadow: 0 12px 40px rgba(185, 137, 24, 0.28);
+    }
+
+    #scena-splash .wordmark {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.6px;
+    }
+
+    #scena-splash .tagline {
+      margin: 0;
+      color: var(--scena-muted);
+      font-size: 14px;
+    }
+
+    #scena-splash .spinner {
+      margin-top: 10px;
+      width: 22px;
+      height: 22px;
+      border: 2.5px solid color-mix(in srgb, var(--scena-gold) 28%, transparent);
+      border-top-color: var(--scena-gold);
+      border-radius: 50%;
+      animation: scena-spin 900ms linear infinite;
+    }
+
+    @keyframes scena-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #scena-splash,
+      #scena-splash .spinner {
+        transition: none;
+        animation: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="scena-splash" role="status" aria-live="polite">
+    <img src="icons/Icon-192.png" alt="" width="84" height="84">
+    <div class="wordmark">Scena</div>
+    <p class="tagline">Preparo la tua serata…</p>
+    <div class="spinner" aria-hidden="true"></div>
+  </div>
+
+  <noscript>
+    <div style="padding: 40px; text-align: center;">
+      Scena ha bisogno di JavaScript per funzionare. Attivalo e ricarica la pagina.
+    </div>
+  </noscript>
+
+  <script>
+    (function () {
+      var splash = document.getElementById('scena-splash');
+      var removed = false;
+      function hideSplash() {
+        if (removed || !splash) return;
+        removed = true;
+        splash.classList.add('is-hidden');
+        window.setTimeout(function () {
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 300);
+      }
+      window.addEventListener('flutter-first-frame', hideSplash);
+      // Rete di sicurezza: non lasciare mai la splash sopra l'app.
+      window.setTimeout(hideSplash, 15000);
+    })();
+  </script>
+
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
