@@ -132,6 +132,30 @@ In produzione servire il proxy in HTTPS, impostare `ALLOWED_ORIGIN` sull'origine
 esatta di Scena e aggiungere autenticazione/rate limiting prima di esporlo
 pubblicamente. Il proxy fornito è volutamente minimale.
 
+### Se la ricerca Web dà errore
+
+Il file `.env` **non viene letto direttamente da Flutter**. È letto solo dal
+proxy all'avvio. Quindi, sul Web:
+
+- il proxy deve essere in esecuzione (`node tool/tmdb_proxy.js`);
+- l'app deve essere compilata o avviata con
+  `--dart-define=TMDB_PROXY_BASE_URL=...`;
+- se il proxy è in ascolto su un'altra macchina, l'URL non può essere
+  `localhost`: usare un indirizzo raggiungibile dal browser e HTTPS;
+- dopo aver modificato `.env` bisogna riavviare il proxy;
+- passare `TMDB_API_KEY` a Flutter Web non serve: per progetto la chiave viene
+  ignorata sul Web e la richiesta deve passare dal proxy.
+
+Per verificare il proxy senza aprire l'app:
+
+```bash
+curl "http://localhost:8787/search/movie?query=Dune&language=it-IT&page=1"
+```
+
+Una risposta JSON con `results` conferma che credenziale, rete e proxy
+funzionano. Un `500` indica che il proxy non ha caricato la credenziale; un
+`401`/`403` indica una credenziale rifiutata da TMDB.
+
 ### Mobile/desktop: chiave diretta o proxy
 
 Per lo sviluppo su mobile si può usare direttamente una API key v3:
@@ -337,7 +361,7 @@ La suite copre dominio, dati e interfaccia:
 flutter test
 ```
 
-Sono presenti 63 test:
+Sono presenti 65 test:
 
 - **Dominio**: vincoli della serata, generi, durate, scarti, determinismo,
   episodi, esclusioni assolute, use case di libreria, sorpresa.

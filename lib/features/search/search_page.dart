@@ -174,8 +174,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   Text(
                     'Film e serie da TMDB, con cache locale per l’uso offline.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 18),
                   TextField(
@@ -319,7 +319,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return EmptyState(
         icon: Icons.search_off_rounded,
         title: 'Nessun risultato',
-        message: 'Non ho trovato «${state.query}». Controlla il titolo o '
+        message:
+            'Non ho trovato «${state.query}». Controlla il titolo o '
             'prova a cambiare tra film e serie.',
       );
     }
@@ -347,9 +348,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: state.loadingMore
                 ? const CircularProgressIndicator()
                 : OutlinedButton.icon(
-                    onPressed: () => ref
-                        .read(searchProvider.notifier)
-                        .loadMore(),
+                    onPressed: () =>
+                        ref.read(searchProvider.notifier).loadMore(),
                     icon: const Icon(Icons.expand_more_rounded),
                     label: const Text('Carica altri'),
                   ),
@@ -406,6 +406,7 @@ class _SearchResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final genres = media.genres.take(3).map((genre) => genre.name).join(' · ');
+    final duration = media.hasKnownDuration ? media.durationLabel() : null;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -474,7 +475,7 @@ class _SearchResultCard extends StatelessWidget {
                       [
                         media.mediaType.label,
                         if (media.releaseYear != null) '${media.releaseYear}',
-                        media.durationLabel(),
+                        ?duration,
                       ].join(' · '),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -497,7 +498,9 @@ class _SearchResultCard extends StatelessWidget {
                         media.overview,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          height: 1.35,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),

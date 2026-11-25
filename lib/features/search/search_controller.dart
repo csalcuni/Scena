@@ -64,15 +64,18 @@ class SearchState {
 }
 
 class SearchController extends Notifier<SearchState> {
+  /// I risultati di ricerca TMDB non includono la durata. La recuperiamo dai
+  /// dettagli senza bloccare la lista: i risultati compaiono subito e ogni
+  /// scheda si aggiorna quando arriva la risposta. La cache del repository
+  /// evita di ripetere le stesse chiamate.
+  static const _detailConcurrency = 4;
+
   var _requestId = 0;
 
   @override
   SearchState build() => const SearchState();
 
-  Future<void> search({
-    required String query,
-    required MediaType type,
-  }) async {
+  Future<void> search({required String query, required MediaType type}) async {
     final normalized = query.trim();
     final requestId = ++_requestId;
     if (normalized.isEmpty) {
@@ -80,17 +83,12 @@ class SearchController extends Notifier<SearchState> {
       return;
     }
 
-    state = SearchState(
-      query: normalized,
-      type: type,
-      loading: true,
-    );
+    state = SearchState(query: normalized, type: type, loading: true);
 
     try {
-      final page = await ref.read(mediaRepositoryProvider).search(
-            query: normalized,
-            type: type,
-          );
+      final page = await ref
+          .read(mediaRepositoryProvider)
+          .search(query: normalized, type: type);
       if (requestId != _requestId) return;
       state = state.copyWith(
         items: page.items,
@@ -101,12 +99,10 @@ class SearchController extends Notifier<SearchState> {
         totalPages: page.totalPages,
         totalResults: page.totalResults,
       );
+      await _enrichDurations(page.items, requestId);
     } on Object catch (error) {
       if (requestId != _requestId) return;
-      state = state.copyWith(
-        loading: false,
-        error: userMessageFor(error),
-      );
+      state = state.copyWith(loading: false, error: userMessageFor(error));
     }
   }
 
@@ -116,11 +112,9 @@ class SearchController extends Notifier<SearchState> {
     final nextPage = state.page + 1;
     state = state.copyWith(loadingMore: true, clearError: true);
     try {
-      final page = await ref.read(mediaRepositoryProvider).search(
-            query: state.query,
-            type: state.type,
-            page: nextPage,
-          );
+      final page = await ref
+          .read(mediaRepositoryProvider)
+          .search(query: state.query, type: state.type, page: nextPage);
       if (requestId != _requestId) return;
       state = state.copyWith(
         items: [...state.items, ...page.items],
@@ -130,13 +124,64 @@ class SearchController extends Notifier<SearchState> {
         totalResults: page.totalResults,
         fromCache: page.isFromCache,
       );
+      await _enrichDurations(page.items, requestId);
     } on Object catch (error) {
       if (requestId != _requestId) return;
-      state = state.copyWith(
-        loadingMore: false,
-        error: userMessageFor(error),
-      );
+      state = state.copyWith(loadingMore: false, error: userMessageFor(error));
     }
+  }
+
+  Future<void> _enrichDurations(List<MediaItem> items, int requestId) async {
+    final pending = items.where(_needsDetails).toList(growable: false);
+    if (pending.isEmpty) return;
+
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        if (requestId != _requestId) return;
+        final index = next++;
+        if (index >= pending.length) return;
+        final item = pending[index];
+        try {
+          final details = await ref
+              .read(mediaRepositoryProvider)
+              .getDetails(type: item.mediaType, tmdbId: item.tmdbId);
+          if (requestId != _requestId) return;
+          _mergeDetails(item, details.media);
+        } on Object {
+          // La lista resta utilizzabile anche se un dettaglio non arriva.
+        }
+      }
+    }
+
+    await Future.wait(
+      List<Future<void>>.generate(_detailConcurrency, (_) => worker()),
+    );
+  }
+
+  bool _needsDetails(MediaItem item) {
+    if (item.mediaType == MediaType.movie) {
+      return item.runtimeMinutes == null || item.runtimeMinutes! <= 0;
+    }
+    return item.episodeRuntimeMinutes == null ||
+        item.numberOfSeasons == null ||
+        item.numberOfEpisodes == null;
+  }
+
+  void _mergeDetails(MediaItem original, MediaItem details) {
+    final index = state.items.indexWhere((item) => item.key == original.key);
+    if (index < 0) return;
+    final merged = original.copyWith(
+      runtimeMinutes: details.runtimeMinutes,
+      episodeRuntimeMinutes: details.episodeRuntimeMinutes,
+      numberOfSeasons: details.numberOfSeasons,
+      numberOfEpisodes: details.numberOfEpisodes,
+      tvStatus: details.tvStatus,
+      genres: details.genres.isEmpty ? null : details.genres,
+    );
+    final updated = [...state.items];
+    updated[index] = merged;
+    state = state.copyWith(items: updated);
   }
 
   void clear() {
@@ -145,5 +190,6 @@ class SearchController extends Notifier<SearchState> {
   }
 }
 
-final searchProvider =
-    NotifierProvider<SearchController, SearchState>(SearchController.new);
+final searchProvider = NotifierProvider<SearchController, SearchState>(
+  SearchController.new,
+);
