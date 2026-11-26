@@ -80,8 +80,14 @@ Serve solo Flutter: nessuna chiave TMDB e nessuna rete.
 
 ```bash
 flutter pub get
-flutter run -d chrome --dart-define=USE_MOCK_TMDB=true
+tool/run_web.sh --dart-define=USE_MOCK_TMDB=true
 ```
+
+`tool/run_web.sh` avvia Chrome su `http://localhost:8080` con porta e hostname
+fissi: è il modo consigliato perché la libreria salvata resti disponibile tra
+un avvio e l'altro (vedi [Perché la porta conta sul Web](#perché-la-porta-conta-sul-web)).
+Gli argomenti aggiuntivi vengono passati a `flutter run`; per cambiare porta
+usare `SCENA_WEB_PORT`.
 
 Il catalogo mock permette di provare ricerca, dettaglio, aggiunta alla libreria,
 proposte, episodi, backup e persistenza. Per Android, iOS o desktop usare lo
@@ -124,9 +130,12 @@ può parlare solo con un proxy che inietta la credenziale lato server.
 3. Avvia Flutter Web puntando al proxy:
 
    ```bash
-   flutter run -d chrome \
+   tool/run_web.sh \
      --dart-define=TMDB_PROXY_BASE_URL=http://localhost:8787
    ```
+
+   Lo script mantiene l'app su `http://localhost:8080`; l'origin deve restare
+   la stessa per ritrovare la libreria salvata in IndexedDB.
 
 In produzione servire il proxy in HTTPS, impostare `ALLOWED_ORIGIN` sull'origine
 esatta di Scena e aggiungere autenticazione/rate limiting prima di esporlo
@@ -216,7 +225,7 @@ flutter build web \
 flutter build apk --debug
 
 # Esecuzione
-flutter run -d chrome --dart-define=USE_MOCK_TMDB=true
+tool/run_web.sh --dart-define=USE_MOCK_TMDB=true
 flutter run -d android --dart-define=USE_MOCK_TMDB=true
 ```
 
@@ -259,6 +268,7 @@ test/
 ├── widget/              # flussi UI, responsive, deep link
 └── support/             # fake repository, DB in memoria, harness
 tool/tmdb_proxy.js       # proxy TMDB senza dipendenze npm
+tool/run_web.sh          # avvio Web su porta fissa (8080)
 web/                     # PWA: manifest, icone, splash, bootstrap
 ```
 
@@ -321,6 +331,28 @@ Il database Drift contiene:
 La migrazione da v1 a v2 crea la cache senza perdere i dati utente. Su Web la
 persistenza è in IndexedDB e sopravvive al refresh della pagina; su
 mobile/desktop è un file SQLite nella directory dei documenti dell'app.
+
+### Perché la porta conta sul Web
+
+IndexedDB è partizionato per **origin**, cioè `schema://host:porta`. Il comando
+`flutter run -d chrome` senza `--web-port` sceglie una porta casuale a ogni
+avvio: ogni esecuzione finisce quindi su un origin diverso, con un database
+vuoto, e la libreria precedente sembra sparita. I dati restano nel browser, ma
+sotto `http://localhost:<altra-porta>`.
+
+Regole pratiche:
+
+- avviare il Web con `tool/run_web.sh`, che fissa
+  `--web-hostname=localhost --web-port=8080`;
+- non alternare `localhost` e `127.0.0.1`: sono origin diverse;
+- `flutter clean` cancella `.dart_tool/`, incluso il profilo Chrome del dev
+  server (`.dart_tool/chrome-device`) e con esso i dati Web di sviluppo;
+- per spostare la libreria su un'altra origin usare export/import del backup.
+
+Per verificare: DevTools → Application → IndexedDB → `http://localhost:8080` →
+`scena_db`. Per recuperare dati salvati su una porta vecchia, rilanciare con
+quella porta (`SCENA_WEB_PORT=46615 tool/run_web.sh ...`) e poi esportare il
+backup.
 
 L'export produce un JSON versionato (`format: "scena-backup"`, `version: 1`) con
 libreria, metadati, eventi, preferenze e scarti. Sul Web il download avviene dal
