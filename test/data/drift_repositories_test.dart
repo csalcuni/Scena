@@ -4,6 +4,7 @@ import 'package:scena/core/errors/app_exception.dart';
 import 'package:scena/data/local/drift/app_database.dart';
 import 'package:scena/data/local/repositories/drift_backup_repository.dart';
 import 'package:scena/data/local/repositories/drift_cache_store.dart';
+import 'package:scena/data/local/repositories/drift_library_list_repository.dart';
 import 'package:scena/data/local/repositories/drift_library_repository.dart';
 import 'package:scena/data/local/repositories/drift_preferences_repository.dart';
 import 'package:scena/domain/entities/dismissed_suggestion.dart';
@@ -16,6 +17,7 @@ import 'package:scena/domain/entities/viewing_event.dart';
 void main() {
   late AppDatabase database;
   late DriftLibraryRepository library;
+  late DriftLibraryListRepository lists;
   late DriftViewingEventRepository events;
   late DriftPreferencesRepository preferences;
   late DriftDismissedSuggestionRepository dismissals;
@@ -25,6 +27,7 @@ void main() {
   setUp(() {
     database = AppDatabase.forTesting(NativeDatabase.memory());
     library = DriftLibraryRepository(database);
+    lists = DriftLibraryListRepository(database);
     events = DriftViewingEventRepository(database);
     preferences = DriftPreferencesRepository(database);
     dismissals = DriftDismissedSuggestionRepository(database);
@@ -193,6 +196,95 @@ void main() {
     });
   });
 
+  group('DriftLibraryListRepository', () {
+    test('crea la lista predefinita e assegna i titoli senza lista', () async {
+      final defaultList = await lists.ensureDefault();
+
+      expect(defaultList.name, 'Da vedere');
+      expect(defaultList.isDefault, isTrue);
+
+      final item = await library.addMedia(
+        media: movie(),
+        status: LibraryStatus.toWatch,
+      );
+      expect(item.entry.listIds, {defaultList.id});
+
+      final reloaded = await library.findById(item.entry.id);
+      expect(reloaded!.entry.listIds, {defaultList.id});
+    });
+
+    test('un titolo può appartenere a più liste contemporaneamente', () async {
+      final defaultList = await lists.ensureDefault();
+      final eighties = await lists.create('Film anni 80');
+      final item = await library.addMedia(
+        media: movie(),
+        status: LibraryStatus.toWatch,
+        listIds: {eighties.id},
+      );
+
+      expect(item.entry.listIds, {eighties.id});
+      await lists.addEntryToList(item.entry.id, defaultList.id);
+
+      final reloaded = await library.findById(item.entry.id);
+      expect(reloaded!.entry.listIds, {defaultList.id, eighties.id});
+
+      await lists.setEntryLists(item.entry.id, {eighties.id});
+      final onlyEighties = await library.findById(item.entry.id);
+      expect(onlyEighties!.entry.listIds, {eighties.id});
+    });
+
+    test('un titolo senza liste esplicite resta nella predefinita', () async {
+      final defaultList = await lists.ensureDefault();
+      final item = await library.addMedia(
+        media: movie(),
+        status: LibraryStatus.toWatch,
+      );
+
+      await lists.setEntryLists(item.entry.id, const {});
+
+      final reloaded = await library.findById(item.entry.id);
+      expect(reloaded!.entry.listIds, {defaultList.id});
+    });
+
+    test('impedisce nomi duplicati e protegge la lista predefinita', () async {
+      final defaultList = await lists.ensureDefault();
+      await lists.create('Classici');
+
+      expect(
+        () => lists.create('classici'),
+        throwsA(isA<ValidationException>()),
+      );
+      expect(
+        () => lists.delete(defaultList.id),
+        throwsA(isA<ValidationException>()),
+      );
+      expect(
+        () => lists.rename(defaultList.id, 'Altra'),
+        throwsA(isA<ValidationException>()),
+      );
+    });
+
+    test('eliminando una lista i titoli orfani tornano nella predefinita',
+        () async {
+      final defaultList = await lists.ensureDefault();
+      final eighties = await lists.create('Film anni 80');
+      final item = await library.addMedia(
+        media: movie(),
+        status: LibraryStatus.toWatch,
+        listIds: {eighties.id},
+      );
+
+      await lists.delete(eighties.id);
+
+      final reloaded = await library.findById(item.entry.id);
+      expect(reloaded!.entry.listIds, {defaultList.id});
+      expect(
+        (await lists.getAll()).map((list) => list.name),
+        isNot(contains('Film anni 80')),
+      );
+    });
+  });
+
   group('DriftPreferencesRepository', () {
     test('crea i valori di default al primo accesso', () async {
       final defaults = await preferences.getPreferences();
@@ -305,9 +397,15 @@ void main() {
           onboardingCompleted: true,
         ),
       );
+      final defaultList = await lists.ensureDefault();
+      final classici = await lists.create('Classici');
       final movieItem = await library.addMedia(
         media: movie(id: 30, title: 'Film da salvare'),
         status: LibraryStatus.completed,
+      );
+      await lists.setEntryLists(
+        movieItem.entry.id,
+        {defaultList.id, classici.id},
       );
       await library.saveEntry(
         movieItem.entry.copyWith(
@@ -359,6 +457,13 @@ void main() {
       expect(summary.entryCount, 2);
       expect(summary.eventCount, 1);
       expect(summary.dismissedCount, 1);
+      expect(summary.listCount, 2);
+
+      final restoredLists = await lists.getAll();
+      expect(
+        restoredLists.map((list) => list.name),
+        containsAll(['Da vedere', 'Classici']),
+      );
 
       final restored = await library.getAll();
       expect(restored, hasLength(2));
@@ -367,6 +472,7 @@ void main() {
       expect(film.entry.personalRating, 8);
       expect(film.entry.personalNote, 'Molto bello');
       expect(film.entry.tags, ['classico']);
+      expect(film.entry.listIds, hasLength(2));
 
       final serie = restored.firstWhere((item) => item.media.title == 'Serie in corso');
       expect(serie.entry.currentSeason, 2);
@@ -377,6 +483,45 @@ void main() {
       expect(restoredPreferences.onboardingCompleted, isTrue);
       expect(restoredPreferences.preferredGenres, [35]);
       expect(await dismissals.getAll(), hasLength(1));
+    });
+
+    test('importa un backup v1 senza liste nella lista predefinita', () async {
+      const legacy = '''
+{
+  "format": "scena-backup",
+  "version": 1,
+  "mediaItems": [
+    {
+      "tmdbId": 77,
+      "mediaType": "movie",
+      "title": "Film vecchio",
+      "genres": []
+    }
+  ],
+  "libraryEntries": [
+    {
+      "mediaKey": "movie:77",
+      "status": "to_watch",
+      "lastActivityAt": "2026-05-20T00:00:00.000",
+      "createdAt": "2026-05-20T00:00:00.000",
+      "updatedAt": "2026-05-20T00:00:00.000"
+    }
+  ],
+  "viewingEvents": [],
+  "dismissedSuggestions": []
+}
+''';
+
+      final summary = await backup.importJson(legacy);
+      expect(summary.listCount, 1);
+
+      final defaultList = (await lists.getAll()).single;
+      expect(defaultList.name, 'Da vedere');
+      expect(defaultList.isDefault, isTrue);
+
+      final restored = (await library.getAll()).single;
+      expect(restored.media.title, 'Film vecchio');
+      expect(restored.entry.listIds, {defaultList.id});
     });
 
     test('rifiuta un JSON non valido', () async {

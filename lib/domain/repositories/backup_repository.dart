@@ -4,14 +4,17 @@ class BackupImportSummary {
     required this.entryCount,
     required this.eventCount,
     required this.dismissedCount,
+    this.listCount = 0,
   });
 
   final int mediaCount;
   final int entryCount;
   final int eventCount;
   final int dismissedCount;
+  final int listCount;
 
-  int get totalItems => mediaCount + entryCount + eventCount + dismissedCount;
+  int get totalItems =>
+      mediaCount + entryCount + eventCount + dismissedCount + listCount;
 }
 
 abstract interface class BackupRepository {

@@ -49,9 +49,34 @@ class LibraryEntries extends Table {
       ];
 }
 
-@DataClassName('ViewingEventRow')
-class ViewingEvents extends Table {
+@DataClassName('LibraryListRow')
+class LibraryLists extends Table {
   IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  BoolColumn get isDefault => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  List<Set<Column<Object>>> get uniqueKeys => [
+        {name},
+      ];
+}
+
+@DataClassName('LibraryListEntryRow')
+class LibraryListEntries extends Table {
+  IntColumn get listId =>
+      integer().references(LibraryLists, #id, onDelete: KeyAction.cascade)();
+  IntColumn get libraryEntryId =>
+      integer().references(LibraryEntries, #id, onDelete: KeyAction.cascade)();
+  DateTimeColumn get addedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {listId, libraryEntryId};
+}
+
+@DataClassName('ViewingEventRow')
+class ViewingEvents extends Table {  IntColumn get id => integer().autoIncrement()();
   IntColumn get libraryEntryId => integer().references(
         LibraryEntries,
         #id,
@@ -86,8 +111,7 @@ class UserPreferencesTable extends Table {
 }
 
 @DataClassName('DismissedSuggestionRow')
-class DismissedSuggestions extends Table {
-  IntColumn get id => integer().autoIncrement()();
+class DismissedSuggestions extends Table {  IntColumn get id => integer().autoIncrement()();
   IntColumn get tmdbId => integer()();
   TextColumn get mediaType => text()();
   TextColumn get reason => text()();

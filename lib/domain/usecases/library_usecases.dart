@@ -13,6 +13,7 @@ class AddToLibrary {
   Future<LibraryEntryWithMedia> call(
     MediaItem media, {
     LibraryStatus status = LibraryStatus.toWatch,
+    Set<int> listIds = const {},
     DateTime? now,
   }) async {
     final existing = await _library.findByMedia(
@@ -26,6 +27,7 @@ class AddToLibrary {
       status: existing?.entry.status ?? status,
       currentSeason: isTv ? (existing?.entry.currentSeason ?? 1) : null,
       currentEpisode: isTv ? (existing?.entry.currentEpisode ?? 1) : null,
+      listIds: listIds,
     );
 
     if (existing == null && status == LibraryStatus.inProgress) {

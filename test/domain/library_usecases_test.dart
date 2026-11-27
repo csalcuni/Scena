@@ -350,6 +350,7 @@ class FakeLibraryRepository implements LibraryRepository {
     required LibraryStatus status,
     int? currentSeason,
     int? currentEpisode,
+    Set<int> listIds = const {},
   }) async {
     final existing = await findByMedia(
       type: media.mediaType,
@@ -362,6 +363,7 @@ class FakeLibraryRepository implements LibraryRepository {
       id: id,
       mediaItemId: media.tmdbId,
       status: status,
+      listIds: listIds,
       currentSeason: currentSeason,
       currentEpisode: currentEpisode,
       lastActivityAt: now,

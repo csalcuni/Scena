@@ -93,6 +93,14 @@ class _EveningHero extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final request = ref.watch(eveningRequestProvider);
+    final lists = ref.watch(libraryListsProvider).value ?? const [];
+    final selectedLists =
+        lists.where((list) => request.listIds.contains(list.id)).toList();
+    final listLabel = request.listIds.isEmpty
+        ? 'Liste: tutte'
+        : selectedLists.isEmpty
+            ? 'Liste: nessuna disponibile'
+            : 'Liste: ${selectedLists.map((list) => list.name).join(', ')}';
     final filterCount = [
       request.noHorror,
       request.noRomance,
@@ -184,6 +192,16 @@ class _EveningHero extends ConsumerWidget {
                   _summary(request),
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  listLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: context.scenaColors.gold,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 22),

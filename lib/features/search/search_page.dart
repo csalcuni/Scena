@@ -11,11 +11,13 @@ import '../../core/theme/breakpoints.dart';
 import '../../core/utils/snackbars.dart';
 import '../../domain/entities/enums.dart';
 import '../../domain/entities/library_entry.dart';
+import '../../domain/entities/library_list.dart';
 import '../../domain/entities/media_item.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/media_artwork.dart';
 import '../../widgets/scena_logo.dart';
 import '../../widgets/status_pill.dart';
+import '../library/list_target_selector.dart';
 import 'search_controller.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
@@ -33,6 +35,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   late MediaType _type;
   Timer? _debounce;
   final Set<String> _busyKeys = {};
+  int? _targetListId;
 
   @override
   void initState() {
@@ -128,15 +131,34 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Future<void> _addToLibrary(
     MediaItem media, {
     LibraryStatus status = LibraryStatus.toWatch,
+    bool listOnly = false,
   }) async {
     if (_busyKeys.contains(media.key)) return;
     setState(() => _busyKeys.add(media.key));
     try {
-      await ref.read(addToLibraryProvider).call(media, status: status);
+      final targetListId = _targetListId;
+      final result = await ref.read(addToLibraryProvider).call(
+            media,
+            status: status,
+            listIds: targetListId == null ? const {} : {targetListId},
+          );
       if (!mounted) return;
+      final lists = ref.read(libraryListsProvider).value ??
+          const <LibraryList>[];
+      final list = lists.where(
+        (item) => targetListId == null ? item.isDefault : item.id == targetListId,
+      );
+      final listName = list.isEmpty ? null : list.first.name;
+      final listPart = listName == null ? '' : ' a «$listName»';
+      final statusPart = result.entry.status == LibraryStatus.toWatch
+          ? ''
+          : ' come «${result.entry.status.label}»';
       showScenaSnackBar(
         context,
-        '«${media.title}» aggiunto come «${status.label}».',
+        listOnly
+            ? '«${media.title}» aggiunto alla lista '
+                '«${listName ?? LibraryList.defaultName}».'
+            : '«${media.title}» aggiunto$listPart$statusPart.',
       );
     } on Object catch (error) {
       if (!mounted) return;
@@ -230,6 +252,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                           style: Theme.of(context).textTheme.labelMedium,
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  ListTargetSelector(
+                    value: _targetListId,
+                    onChanged: (listId) =>
+                        setState(() => _targetListId = listId),
+                    label: 'Aggiungi i risultati a',
                   ),
                   if (state.fromCache) ...[
                     const SizedBox(height: 12),
@@ -340,6 +369,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
             onAdd: (status) =>
                 _addToLibrary(state.items[index], status: status),
+            onAddToList: () =>
+                _addToLibrary(state.items[index], listOnly: true),
           ),
         ],
         if (state.hasMore) ...[
@@ -394,6 +425,7 @@ class _SearchResultCard extends StatelessWidget {
     required this.busy,
     required this.onOpen,
     required this.onAdd,
+    required this.onAddToList,
   });
 
   final MediaItem media;
@@ -401,6 +433,7 @@ class _SearchResultCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onOpen;
   final ValueChanged<LibraryStatus> onAdd;
+  final VoidCallback onAddToList;
 
   @override
   Widget build(BuildContext context) {
@@ -523,6 +556,17 @@ class _SearchResultCard extends StatelessWidget {
                               ),
                             ),
                             child: const Text('Apri'),
+                          ),
+                          TextButton.icon(
+                            onPressed: busy ? null : onAddToList,
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 32),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                            ),
+                            icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                            label: const Text('Aggiungi a lista'),
                           ),
                         ],
                       )

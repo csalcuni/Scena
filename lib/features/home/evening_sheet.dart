@@ -61,6 +61,7 @@ class _EveningSheetState extends ConsumerState<EveningSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final lists = ref.watch(libraryListsProvider).value ?? const [];
     final filterCount = [
       _draft.noHorror,
       _draft.noRomance,
@@ -133,6 +134,50 @@ class _EveningSheetState extends ConsumerState<EveningSheet> {
                       selected: _draft.context == contextValue,
                       onSelected: (_) => setState(() {
                         _draft = _draft.copyWith(context: contextValue);
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Liste da cui scegliere',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Se non selezioni nulla, l’algoritmo considera tutte le liste.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Tutte le liste'),
+                    selected: _draft.listIds.isEmpty,
+                    onSelected: (_) => setState(() {
+                      _draft = _draft.copyWith(listIds: const {});
+                    }),
+                  ),
+                  for (final list in lists)
+                    FilterChip(
+                      label: Text(
+                        list.isDefault
+                            ? '${list.name} (predefinita)'
+                            : list.name,
+                      ),
+                      selected: _draft.listIds.contains(list.id),
+                      onSelected: (selected) => setState(() {
+                        final next = {..._draft.listIds};
+                        if (selected) {
+                          next.add(list.id);
+                        } else {
+                          next.remove(list.id);
+                        }
+                        _draft = _draft.copyWith(listIds: next);
                       }),
                     ),
                 ],

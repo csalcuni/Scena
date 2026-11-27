@@ -11,6 +11,7 @@ class EveningRequest {
     this.noRomance = false,
     this.familyOnly = false,
     this.subtitlesAccepted = true,
+    this.listIds = const {},
   });
 
   /// `null` significa tempo illimitato.
@@ -21,6 +22,9 @@ class EveningRequest {
   final bool noRomance;
   final bool familyOnly;
   final bool subtitlesAccepted;
+
+  /// Liste da cui scegliere le proposte. Vuoto significa tutte le liste.
+  final Set<int> listIds;
 
   bool get unlimited => availableMinutes == null;
 
@@ -37,6 +41,7 @@ class EveningRequest {
     bool? noRomance,
     bool? familyOnly,
     bool? subtitlesAccepted,
+    Set<int>? listIds,
   }) {
     return EveningRequest(
       availableMinutes: clearAvailableMinutes
@@ -48,6 +53,7 @@ class EveningRequest {
       noRomance: noRomance ?? this.noRomance,
       familyOnly: familyOnly ?? this.familyOnly,
       subtitlesAccepted: subtitlesAccepted ?? this.subtitlesAccepted,
+      listIds: listIds ?? this.listIds,
     );
   }
 }

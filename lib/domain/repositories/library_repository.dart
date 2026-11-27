@@ -18,11 +18,13 @@ abstract interface class LibraryRepository {
 
   /// Inserisce o aggiorna i metadati del media e la voce di libreria.
   /// Se la voce esiste già, restituisce quella esistente senza duplicarla.
+  /// [listIds] vuoto assegna la lista predefinita.
   Future<LibraryEntryWithMedia> addMedia({
     required MediaItem media,
     required LibraryStatus status,
     int? currentSeason,
     int? currentEpisode,
+    Set<int> listIds = const {},
   });
 
   Future<LibraryEntry> saveEntry(LibraryEntry entry);

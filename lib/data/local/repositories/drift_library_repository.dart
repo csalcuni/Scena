@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../../../domain/entities/dismissed_suggestion.dart';
 import '../../../domain/entities/enums.dart';
 import '../../../domain/entities/library_entry.dart';
+import '../../../domain/entities/library_list.dart';
 import '../../../domain/entities/media_item.dart';
 import '../../../domain/entities/viewing_event.dart';
 import '../../../domain/repositories/library_repository.dart';
@@ -53,6 +54,7 @@ class DriftLibraryRepository implements LibraryRepository {
     required LibraryStatus status,
     int? currentSeason,
     int? currentEpisode,
+    Set<int> listIds = const {},
   }) async {
     return _database.transaction(() async {
       final now = DateTime.now();
@@ -77,8 +79,26 @@ class DriftLibraryRepository implements LibraryRepository {
           await (_database.select(_database.libraryEntries)
                 ..where((table) => table.mediaItemId.equals(mediaRow.id)))
               .getSingle();
+
+      final validListIds = await _validListIds(listIds);
+      final targetListIds =
+          validListIds.isEmpty ? {await _defaultListId(now)} : validListIds;
+      for (final listId in targetListIds) {
+        await _database.into(_database.libraryListEntries).insert(
+              LibraryListEntriesCompanion.insert(
+                listId: listId,
+                libraryEntryId: entryRow.id,
+                addedAt: now,
+              ),
+              mode: InsertMode.insertOrIgnore,
+            );
+      }
+
       return LibraryEntryWithMedia(
-        entry: _entryFromRow(entryRow),
+        entry: _entryFromRow(
+          entryRow,
+          listIds: await _listIdsForEntry(entryRow.id),
+        ),
         media: _mediaFromRow(mediaRow),
       );
     });
@@ -116,17 +136,64 @@ class DriftLibraryRepository implements LibraryRepository {
         _database.mediaItems,
         _database.mediaItems.id.equalsExp(_database.libraryEntries.mediaItemId),
       ),
+      leftOuterJoin(
+        _database.libraryListEntries,
+        _database.libraryListEntries.libraryEntryId
+            .equalsExp(_database.libraryEntries.id),
+      ),
     ]);
   }
 
   Future<LibraryEntryWithMedia?> _find(Expression<bool> predicate) async {
     final query = _joinQuery()..where(predicate);
-    final row = await query.getSingleOrNull();
-    if (row == null) return null;
-    return LibraryEntryWithMedia(
-      entry: _entryFromRow(row.readTable(_database.libraryEntries)),
-      media: _mediaFromRow(row.readTable(_database.mediaItems)),
-    );
+    final rows = await query.get();
+    if (rows.isEmpty) return null;
+    return _mapRows(rows).first;
+  }
+
+  Future<Set<int>> _listIdsForEntry(int entryId) async {
+    final rows = await (_database.select(_database.libraryListEntries)
+          ..where((table) => table.libraryEntryId.equals(entryId)))
+        .get();
+    return rows.map((row) => row.listId).toSet();
+  }
+
+  Future<Set<int>> _validListIds(Set<int> listIds) async {
+    if (listIds.isEmpty) return const {};
+    final rows = await (_database.select(_database.libraryLists)
+          ..where((table) => table.id.isIn(listIds)))
+        .get();
+    return rows.map((row) => row.id).toSet();
+  }
+
+  Future<int> _defaultListId(DateTime now) async {
+    final existingDefault = await (_database.select(_database.libraryLists)
+          ..where((table) => table.isDefault.equals(true)))
+        .getSingleOrNull();
+    if (existingDefault != null) return existingDefault.id;
+
+    final namedDefault = await (_database.select(_database.libraryLists)
+          ..where(
+            (table) => table.name.lower().equals(
+                  LibraryList.defaultName.toLowerCase(),
+                ),
+          ))
+        .getSingleOrNull();
+    if (namedDefault != null) {
+      await (_database.update(_database.libraryLists)
+            ..where((table) => table.id.equals(namedDefault.id)))
+          .write(const LibraryListsCompanion(isDefault: Value(true)));
+      return namedDefault.id;
+    }
+
+    return _database.into(_database.libraryLists).insert(
+          LibraryListsCompanion.insert(
+            name: LibraryList.defaultName,
+            isDefault: const Value(true),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
   }
 
   Future<MediaItemRow> _upsertMedia(MediaItem media, DateTime now) async {
@@ -179,21 +246,44 @@ class DriftLibraryRepository implements LibraryRepository {
   List<LibraryEntryWithMedia> _mapRows(
     List<TypedResult> rows,
   ) {
-    return rows
+    final order = <int>[];
+    final mediaByEntry = <int, MediaItem>{};
+    final entryById = <int, LibraryEntryRow>{};
+    final listIdsByEntry = <int, Set<int>>{};
+
+    for (final row in rows) {
+      final entryRow = row.readTable(_database.libraryEntries);
+      final mediaRow = row.readTable(_database.mediaItems);
+      final listRow = row.readTableOrNull(_database.libraryListEntries);
+
+      if (!entryById.containsKey(entryRow.id)) {
+        order.add(entryRow.id);
+        entryById[entryRow.id] = entryRow;
+        mediaByEntry[entryRow.id] = _mediaFromRow(mediaRow);
+        listIdsByEntry[entryRow.id] = <int>{};
+      }
+      if (listRow != null) {
+        listIdsByEntry[entryRow.id]!.add(listRow.listId);
+      }
+    }
+
+    return order
         .map(
-          (row) => LibraryEntryWithMedia(
+          (id) => LibraryEntryWithMedia(
             entry: _entryFromRow(
-              row.readTable(_database.libraryEntries),
+              entryById[id]!,
+              listIds: listIdsByEntry[id] ?? const {},
             ),
-            media: _mediaFromRow(
-              row.readTable(_database.mediaItems),
-            ),
+            media: mediaByEntry[id]!,
           ),
         )
         .toList(growable: false);
   }
 
-  LibraryEntry _entryFromRow(LibraryEntryRow row) {
+  LibraryEntry _entryFromRow(
+    LibraryEntryRow row, {
+    Set<int> listIds = const {},
+  }) {
     return LibraryEntry(
       id: row.id,
       mediaItemId: row.mediaItemId,
@@ -201,6 +291,7 @@ class DriftLibraryRepository implements LibraryRepository {
       personalRating: row.personalRating,
       personalNote: row.personalNote,
       tags: LibraryEntry.tagsFromJson(row.tagsJson),
+      listIds: listIds,
       currentSeason: row.currentSeason,
       currentEpisode: row.currentEpisode,
       lastActivityAt: row.lastActivityAt,

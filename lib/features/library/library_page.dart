@@ -9,12 +9,15 @@ import '../../core/theme/breakpoints.dart';
 import '../../core/utils/snackbars.dart';
 import '../../domain/entities/enums.dart';
 import '../../domain/entities/library_entry.dart';
+import '../../domain/entities/library_list.dart';
 import '../../widgets/confirm_dialog.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/media_artwork.dart';
 import '../../widgets/scena_logo.dart';
 import '../../widgets/status_pill.dart';
 import 'entry_editor_sheet.dart';
+import 'library_lists_sheet.dart';
+import 'list_dialogs.dart';
 
 class LibraryPage extends ConsumerStatefulWidget {
   const LibraryPage({super.key});
@@ -27,6 +30,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
   final TextEditingController _searchController = TextEditingController();
   var _query = '';
   List<LibraryStatus>? _statusFilter;
+  int? _listFilter;
 
   static const _filters = <_LibraryFilter>[
     _LibraryFilter(label: 'Tutti', statuses: null),
@@ -65,6 +69,10 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     final query = _query.trim().toLowerCase();
     return items.where((item) {
       if (!_matchesFilter(item.entry.status)) return false;
+      final listFilter = _listFilter;
+      if (listFilter != null && !item.entry.listIds.contains(listFilter)) {
+        return false;
+      }
       if (query.isEmpty) return true;
       final haystack = [
         item.media.title,
@@ -161,6 +169,15 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     BuildContext context,
     List<LibraryEntryWithMedia> items,
   ) {
+    final lists =
+        ref.watch(libraryListsProvider).value ?? const <LibraryList>[];
+    final listNames = {for (final list in lists) list.id: list.name};
+    final scopedItems = _listFilter == null
+        ? items
+        : items
+            .where((item) => item.entry.listIds.contains(_listFilter))
+            .toList(growable: false);
+
     if (items.isEmpty) {
       return EmptyState(
         icon: Icons.video_library_outlined,
@@ -174,6 +191,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             icon: const Icon(Icons.search_rounded),
             label: const Text('Cerca un titolo'),
           ),
+          OutlinedButton.icon(
+            onPressed: () => showLibraryListsSheet(context),
+            icon: const Icon(Icons.playlist_play_rounded),
+            label: const Text('Gestisci le liste'),
+          ),
         ],
       );
     }
@@ -182,7 +204,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('La tua libreria', style: Theme.of(context).textTheme.headlineLarge),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                'La tua libreria',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => showLibraryListsSheet(context),
+              icon: const Icon(Icons.playlist_play_rounded),
+              label: const Text('Liste'),
+            ),
+          ],
+        ),
         const SizedBox(height: 4),
         Text(
           '${items.length} ${items.length == 1 ? 'titolo salvato' : 'titoli salvati'} · '
@@ -193,13 +230,25 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
         ),
         const SizedBox(height: 20),
         _LibraryStats(
-          items: items,
+          items: scopedItems,
           selected: _statusFilter,
           onSelected: (statuses) => setState(() {
             _statusFilter = statuses;
           }),
         ),
         const SizedBox(height: 18),
+        _ListFilters(
+          lists: lists,
+          selectedId: _listFilter,
+          onSelected: (listId) => setState(() => _listFilter = listId),
+          onCreate: () async {
+            final list = await createLibraryList(context, ref);
+            if (list != null && mounted) {
+              setState(() => _listFilter = list.id);
+            }
+          },
+        ),
+        const SizedBox(height: 16),
         TextField(
           controller: _searchController,
           onChanged: (value) => setState(() => _query = value),
@@ -247,6 +296,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                   setState(() {
                     _query = '';
                     _statusFilter = null;
+                    _listFilter = null;
                   });
                 },
                 child: const Text('Azzera filtri'),
@@ -263,6 +313,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       if (index > 0) const SizedBox(height: 10),
                       _LibraryListCard(
                         item: filtered[index],
+                        listNames: listNames,
                         onOpen: () => _open(filtered[index]),
                         onEdit: () => showLibraryEditor(context, filtered[index]),
                         onMarkWatched: () => _markWatched(filtered[index]),
@@ -289,6 +340,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
                       width: width,
                       child: _LibraryGridCard(
                         item: item,
+                        listNames: listNames,
                         onOpen: () => _open(item),
                         onEdit: () => showLibraryEditor(context, item),
                         onMarkWatched: () => _markWatched(item),
@@ -320,6 +372,67 @@ class _LibraryFilter {
 
   final String label;
   final List<LibraryStatus>? statuses;
+}
+
+class _ListFilters extends StatelessWidget {
+  const _ListFilters({
+    required this.lists,
+    required this.selectedId,
+    required this.onSelected,
+    required this.onCreate,
+  });
+
+  final List<LibraryList> lists;
+  final int? selectedId;
+  final ValueChanged<int?> onSelected;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Liste',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('Tutte le liste'),
+              selected: selectedId == null,
+              onSelected: (_) => onSelected(null),
+            ),
+            for (final list in lists)
+              ChoiceChip(
+                avatar: Icon(
+                  list.isDefault
+                      ? Icons.bookmark_rounded
+                      : Icons.playlist_play_rounded,
+                  size: 16,
+                ),
+                label: Text(
+                  list.isDefault ? '${list.name} (predefinita)' : list.name,
+                ),
+                selected: selectedId == list.id,
+                onSelected: (_) => onSelected(list.id),
+              ),
+            ActionChip(
+              avatar: const Icon(Icons.add_rounded, size: 16),
+              label: const Text('Nuova'),
+              onPressed: onCreate,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 class _LibraryStats extends StatelessWidget {
@@ -478,6 +591,7 @@ class _StatCard extends StatelessWidget {
 class _LibraryListCard extends StatelessWidget {
   const _LibraryListCard({
     required this.item,
+    required this.listNames,
     required this.onOpen,
     required this.onEdit,
     required this.onMarkWatched,
@@ -485,6 +599,7 @@ class _LibraryListCard extends StatelessWidget {
   });
 
   final LibraryEntryWithMedia item;
+  final Map<int, String> listNames;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
   final VoidCallback onMarkWatched;
@@ -554,6 +669,9 @@ class _LibraryListCard extends StatelessWidget {
                           _SmallPill(label: entry.nextEpisodeLabel!),
                         if (entry.personalRating != null)
                           _SmallPill(label: '${entry.personalRating}/10'),
+                        for (final listId in entry.listIds)
+                          if (listNames[listId] != null)
+                            _SmallPill(label: listNames[listId]!),
                       ],
                     ),
                     if (entry.personalNote?.trim().isNotEmpty ?? false) ...[
@@ -593,6 +711,7 @@ class _LibraryListCard extends StatelessWidget {
 class _LibraryGridCard extends StatelessWidget {
   const _LibraryGridCard({
     required this.item,
+    required this.listNames,
     required this.onOpen,
     required this.onEdit,
     required this.onMarkWatched,
@@ -600,6 +719,7 @@ class _LibraryGridCard extends StatelessWidget {
   });
 
   final LibraryEntryWithMedia item;
+  final Map<int, String> listNames;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
   final VoidCallback onMarkWatched;
@@ -673,6 +793,20 @@ class _LibraryGridCard extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  if (entry.listIds.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.listIds
+                          .map((id) => listNames[id])
+                          .whereType<String>()
+                          .join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                   if (entry.personalRating != null ||
                       entry.tags.isNotEmpty) ...[
                     const SizedBox(height: 6),

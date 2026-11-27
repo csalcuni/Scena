@@ -9,12 +9,14 @@ import '../../core/theme/breakpoints.dart';
 import '../../core/utils/snackbars.dart';
 import '../../domain/entities/enums.dart';
 import '../../domain/entities/library_entry.dart';
+import '../../domain/entities/library_list.dart';
 import '../../domain/entities/media_item.dart';
 import '../../widgets/confirm_dialog.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/media_artwork.dart';
 import '../../widgets/status_pill.dart';
 import '../library/entry_editor_sheet.dart';
+import '../library/list_target_selector.dart';
 
 class MediaDetailPage extends ConsumerStatefulWidget {
   const MediaDetailPage({
@@ -32,6 +34,7 @@ class MediaDetailPage extends ConsumerStatefulWidget {
 
 class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
   var _busy = false;
+  int? _targetListId;
 
   MediaType? get _type {
     for (final type in MediaType.values) {
@@ -62,11 +65,25 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await ref.read(addToLibraryProvider).call(media, status: status);
+      final targetListId = _targetListId;
+      final result = await ref.read(addToLibraryProvider).call(
+            media,
+            status: status,
+            listIds: targetListId == null ? const {} : {targetListId},
+          );
       if (!mounted) return;
+      final lists = ref.read(libraryListsProvider).value ??
+          const <LibraryList>[];
+      final list = lists.where(
+        (item) => targetListId == null ? item.isDefault : item.id == targetListId,
+      );
+      final listName = list.isEmpty ? LibraryList.defaultName : list.first.name;
+      final statusPart = result.entry.status == LibraryStatus.toWatch
+          ? ''
+          : ' come «${result.entry.status.label}»';
       showScenaSnackBar(
         context,
-        '«${media.title}» aggiunto come «${status.label}».',
+        '«${media.title}» aggiunto a «$listName»$statusPart.',
       );
     } on Object catch (error) {
       if (!mounted) return;
@@ -299,6 +316,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage> {
                           media: media,
                           entry: entry,
                           busy: _busy,
+                          targetListId: _targetListId,
+                          onTargetListChanged: (listId) =>
+                              setState(() => _targetListId = listId),
                           onAdd: (status) => _add(media, status: status),
                           onStatus: (status) =>
                               entry == null ? null : _changeStatus(entry, status),
@@ -546,6 +566,8 @@ class _ActionsSection extends StatelessWidget {
     required this.media,
     required this.entry,
     required this.busy,
+    required this.targetListId,
+    required this.onTargetListChanged,
     required this.onAdd,
     required this.onStatus,
     required this.onMarkEpisode,
@@ -557,6 +579,8 @@ class _ActionsSection extends StatelessWidget {
   final MediaItem media;
   final LibraryEntryWithMedia? entry;
   final bool busy;
+  final int? targetListId;
+  final ValueChanged<int?> onTargetListChanged;
   final ValueChanged<LibraryStatus> onAdd;
   final ValueChanged<LibraryStatus>? onStatus;
   final VoidCallback? onMarkEpisode;
@@ -590,6 +614,11 @@ class _ActionsSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
+            ListTargetSelector(
+              value: targetListId,
+              onChanged: onTargetListChanged,
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 10,
               runSpacing: 10,

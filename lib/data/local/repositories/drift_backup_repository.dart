@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../../../core/errors/app_exception.dart';
 import '../../../domain/entities/enums.dart';
+import '../../../domain/entities/library_list.dart';
 import '../../../domain/entities/user_preferences.dart';
 import '../../../domain/repositories/backup_repository.dart';
 import '../drift/app_database.dart';
@@ -12,7 +13,7 @@ class DriftBackupRepository implements BackupRepository {
   const DriftBackupRepository(this._database);
 
   static const String format = 'scena-backup';
-  static const int backupVersion = 1;
+  static const int backupVersion = 2;
 
   final AppDatabase _database;
 
@@ -23,12 +24,22 @@ class DriftBackupRepository implements BackupRepository {
         .getSingleOrNull();
     final mediaRows = await _database.select(_database.mediaItems).get();
     final entryRows = await _database.select(_database.libraryEntries).get();
+    final listRows = await _database.select(_database.libraryLists).get();
+    final listEntryRows =
+        await _database.select(_database.libraryListEntries).get();
     final eventRows = await _database.select(_database.viewingEvents).get();
     final dismissedRows =
         await _database.select(_database.dismissedSuggestions).get();
 
     final mediaById = {for (final row in mediaRows) row.id: row};
     final entryById = {for (final row in entryRows) row.id: row};
+    final listNameById = {for (final row in listRows) row.id: row.name};
+    final listNamesByEntry = <int, List<String>>{};
+    for (final row in listEntryRows) {
+      final name = listNameById[row.listId];
+      if (name == null) continue;
+      listNamesByEntry.putIfAbsent(row.libraryEntryId, () => []).add(name);
+    }
 
     final data = <String, dynamic>{
       'format': format,
@@ -37,12 +48,23 @@ class DriftBackupRepository implements BackupRepository {
       'preferences': preferencesRow == null
           ? const UserPreferences().toJson()
           : _preferencesToJson(preferencesRow),
+      'lists': listRows
+          .map(
+            (row) => {
+              'name': row.name,
+              'isDefault': row.isDefault,
+              'createdAt': row.createdAt.toIso8601String(),
+              'updatedAt': row.updatedAt.toIso8601String(),
+            },
+          )
+          .toList(growable: false),
       'mediaItems': mediaRows.map(_mediaToJson).toList(growable: false),
       'libraryEntries': entryRows
           .map(
             (row) => _entryToJson(
               row,
               _mediaKey(mediaById[row.mediaItemId]),
+              listNamesByEntry[row.id] ?? const [],
             ),
           )
           .toList(growable: false),
@@ -86,6 +108,7 @@ class DriftBackupRepository implements BackupRepository {
 
       final mediaList = _listOfMaps(decoded['mediaItems']);
       final entryList = _listOfMaps(decoded['libraryEntries']);
+      final listList = _listOfMaps(decoded['lists']);
       final eventList = _listOfMaps(decoded['viewingEvents']);
       final dismissedList = _listOfMaps(decoded['dismissedSuggestions']);
       final preferencesRaw = decoded['preferences'];
@@ -95,6 +118,27 @@ class DriftBackupRepository implements BackupRepository {
 
       return await _database.transaction(() async {
         await _deleteUserData();
+
+        final listIdsByName = <String, int>{};
+        for (final item in listList) {
+          final name = _string(item['name']).trim();
+          if (name.isEmpty) continue;
+          if (_findListIdByName(listIdsByName, name) != null) {
+            throw const ValidationException(
+              'Il backup contiene liste con lo stesso nome.',
+            );
+          }
+          final id = await _database.into(_database.libraryLists).insert(
+                LibraryListsCompanion.insert(
+                  name: name,
+                  createdAt: _date(item['createdAt']),
+                  updatedAt: _date(item['updatedAt']),
+                ),
+              );
+          listIdsByName[name] = id;
+        }
+        final defaultListId = await _ensureDefaultList(listIdsByName);
+
         final mediaIds = <String, int>{};
         for (final item in mediaList) {
           final key = _mediaKeyFromJson(item);
@@ -127,6 +171,27 @@ class DriftBackupRepository implements BackupRepository {
                 _entryCompanion(mediaId, item),
               );
           entryIds[mediaKey] = id;
+
+          final listNames = item['lists'];
+          final names = listNames is List
+              ? listNames.whereType<String>().toList(growable: false)
+              : const <String>[];
+          final targetIds = <int>{};
+          for (final name in names) {
+            final listId = _findListIdByName(listIdsByName, name);
+            if (listId != null) targetIds.add(listId);
+          }
+          for (final listId
+              in targetIds.isEmpty ? {defaultListId} : targetIds) {
+            await _database.into(_database.libraryListEntries).insert(
+                  LibraryListEntriesCompanion.insert(
+                    listId: listId,
+                    libraryEntryId: id,
+                    addedAt: _date(item['createdAt']),
+                  ),
+                  mode: InsertMode.insertOrIgnore,
+                );
+          }
         }
 
         for (final event in eventList) {
@@ -183,6 +248,7 @@ class DriftBackupRepository implements BackupRepository {
           entryCount: entryList.length,
           eventCount: eventList.length,
           dismissedCount: dismissedList.length,
+          listCount: listIdsByName.length,
         );
       });
     } on AppException {
@@ -204,10 +270,47 @@ class DriftBackupRepository implements BackupRepository {
 
   Future<void> _deleteUserData() async {
     await _database.delete(_database.viewingEvents).go();
+    await _database.delete(_database.libraryListEntries).go();
     await _database.delete(_database.libraryEntries).go();
     await _database.delete(_database.mediaItems).go();
+    await _database.delete(_database.libraryLists).go();
     await _database.delete(_database.dismissedSuggestions).go();
     await _database.delete(_database.userPreferencesTable).go();
+  }
+
+  Future<int> _ensureDefaultList(Map<String, int> listIdsByName) async {
+    final existing = await (_database.select(_database.libraryLists)
+          ..where((table) => table.isDefault.equals(true)))
+        .getSingleOrNull();
+    if (existing != null) return existing.id;
+
+    final named = _findListIdByName(listIdsByName, LibraryList.defaultName);
+    if (named != null) {
+      await (_database.update(_database.libraryLists)
+            ..where((table) => table.id.equals(named)))
+          .write(const LibraryListsCompanion(isDefault: Value(true)));
+      return named;
+    }
+
+    final now = DateTime.now();
+    final id = await _database.into(_database.libraryLists).insert(
+          LibraryListsCompanion.insert(
+            name: LibraryList.defaultName,
+            isDefault: const Value(true),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+    listIdsByName[LibraryList.defaultName] = id;
+    return id;
+  }
+
+  int? _findListIdByName(Map<String, int> listIdsByName, String name) {
+    final normalized = name.trim().toLowerCase();
+    for (final entry in listIdsByName.entries) {
+      if (entry.key.trim().toLowerCase() == normalized) return entry.value;
+    }
+    return null;
   }
 
   Map<String, dynamic> _mediaToJson(MediaItemRow row) {
@@ -236,6 +339,7 @@ class DriftBackupRepository implements BackupRepository {
   Map<String, dynamic> _entryToJson(
     LibraryEntryRow row,
     String? mediaKey,
+    List<String> listNames,
   ) {
     return {
       'mediaKey': mediaKey,
@@ -243,6 +347,7 @@ class DriftBackupRepository implements BackupRepository {
       'personalRating': row.personalRating,
       'personalNote': row.personalNote,
       'tags': jsonDecode(row.tagsJson),
+      'lists': listNames,
       'currentSeason': row.currentSeason,
       'currentEpisode': row.currentEpisode,
       'lastActivityAt': row.lastActivityAt.toIso8601String(),

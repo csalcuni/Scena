@@ -15,6 +15,7 @@ import '../../domain/entities/streaming_service.dart';
 import '../../domain/entities/user_preferences.dart';
 import '../../domain/repositories/backup_repository.dart';
 import '../../widgets/confirm_dialog.dart';
+import '../../widgets/prompt_dialog.dart';
 import '../../widgets/scena_logo.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -97,11 +98,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (summary == null || !mounted) return;
     ref.invalidate(preferencesProvider);
     ref.invalidate(libraryProvider);
+    ref.invalidate(libraryListsProvider);
     ref.invalidate(dismissedSuggestionsProvider);
+    ref.read(eveningRequestProvider.notifier).setRequest(
+          ref.read(eveningRequestProvider).copyWith(listIds: const {}),
+        );
     showScenaSnackBar(
       context,
       'Backup importato: ${summary.entryCount} voci di libreria, '
-      '${summary.eventCount} eventi.',
+      '${summary.listCount} liste, ${summary.eventCount} eventi.',
     );
   }
 
@@ -110,7 +115,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final confirmed = await confirmAction(
       context,
       title: 'Cancellare tutti i dati?',
-      message: 'Libreria, voti, note, tag, eventi, scarti e preferenze '
+      message: 'Libreria, liste, voti, note, tag, eventi, scarti e preferenze '
           'verranno eliminati da questo dispositivo. L’operazione non può '
           'essere annullata: esporta prima un backup se vuoi conservarli.',
       confirmLabel: 'Cancella tutto',
@@ -122,7 +127,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       await ref.read(backupRepositoryProvider).clearAll();
       ref.invalidate(preferencesProvider);
       ref.invalidate(libraryProvider);
+      ref.invalidate(libraryListsProvider);
       ref.invalidate(dismissedSuggestionsProvider);
+      ref.read(eveningRequestProvider.notifier).setRequest(
+            ref.read(eveningRequestProvider).copyWith(listIds: const {}),
+          );
       if (!mounted) return;
       showScenaSnackBar(context, 'Dati locali cancellati.');
     } on Object catch (error) {
@@ -576,35 +585,14 @@ class _ExclusionsSection extends StatelessWidget {
   final ValueChanged<String> onKeywordRemoved;
 
   Future<void> _addKeyword(BuildContext context) async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Nuova parola da escludere'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
-          textInputAction: TextInputAction.done,
-          decoration: const InputDecoration(
-            hintText: 'Es. zombie, guerra, musical',
-            helperText: 'Confrontata con titolo, trama, tag e note.',
-          ),
-          onSubmitted: (text) => Navigator.of(context).pop(text),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Annulla'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Aggiungi'),
-          ),
-        ],
-      ),
+    final value = await promptText(
+      context,
+      title: 'Nuova parola da escludere',
+      hintText: 'Es. zombie, guerra, musical',
+      helperText: 'Confrontata con titolo, trama, tag e note.',
+      maxLength: 40,
+      actionLabel: 'Aggiungi',
     );
-    controller.dispose();
     final keyword = value?.trim();
     if (keyword == null || keyword.isEmpty) return;
     onKeywordAdded(keyword);

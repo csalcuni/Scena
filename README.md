@@ -15,6 +15,7 @@ tablet e desktop.
 ## Indice
 
 - [Funzionalità](#funzionalità)
+- [Liste personali](#liste-personali)
 - [Stack](#stack)
 - [Avvio rapido: modalità demo](#avvio-rapido-modalità-demo)
 - [TMDB reale](#tmdb-reale)
@@ -34,18 +35,23 @@ tablet e desktop.
 - **Onboarding in 3 passaggi**: generi preferiti, generi da evitare, servizi e
   abitudini di visione. Si completa una sola volta.
 - **Stasera**: richiesta della serata con tempo disponibile, compagnia, umore e
-  vincoli (`niente horror`, `niente romance`, `solo famiglia`). La home mostra
-  fino a tre proposte motivate, con stato, durata stimata e possibilità di
-  scartarle o ripristinarle.
+  vincoli (`niente horror`, `niente romance`, `solo famiglia`). Si possono
+  scegliere una o più liste, oppure tutte, da cui pescare le proposte. La home
+  mostra fino a tre proposte motivate, con stato, durata stimata e possibilità
+  di scartarle o ripristinarle.
 - **Riprendi**: mette in evidenza film iniziati e serie con il prossimo episodio
   da guardare.
 - **Sorprendimi**: estrae un titolo eleggibile dalla libreria, evitando quelli
-  appena scartati.
+  appena scartati e rispettando le liste scelte per la serata.
+- **Liste personali**: crea liste come `Film anni 80` o `Film di Walter Hill`.
+  Un titolo può stare in più liste contemporaneamente; la lista `Da vedere` è
+  sempre presente ed è quella predefinita.
 - **Libreria**: stati `Da vedere`, `In corso`, `In pausa`, `Visto`,
-  `Abbandonato`; voto personale 1–10; note; tag; avanzamento episodi per le
-  serie; ricerca e filtri locali.
+  `Abbandonato`; filtro per lista, voto personale 1–10, note, tag, avanzamento
+  episodi per le serie, ricerca e filtri locali.
 - **Ricerca TMDB**: film e serie, paginazione, dettaglio con trama, cast, regia e
-  metadati; aggiunta alla libreria con lo stato scelto.
+  metadati; aggiunta alla libreria con lo stato scelto e la lista di
+  destinazione (se non ne scegli una, il titolo va in `Da vedere`).
 - **Scheda titolo**: azioni di libreria, modifica, cambio stato, segna episodio o
   visto, rimozione. Se TMDB non è raggiungibile usa i metadati salvati e lo
   segnala.
@@ -60,6 +66,32 @@ tablet e desktop.
 
 Non ci sono account, social, recensioni pubbliche, trailer né disponibilità
 streaming inventate.
+
+## Liste personali
+
+La libreria non è un elenco unico: puoi organizzarla in liste quante vuoi, ad
+esempio `Film anni 80`, `Film di Walter Hill` o `Serie da recuperare`.
+
+- **Lista predefinita**: `Da vedere` esiste sempre. Un titolo salvato senza
+  scegliere una lista finisce qui.
+- **Più liste per titolo**: un film o una serie può appartenere a più liste
+  contemporaneamente. Rimuoverlo da una lista non lo elimina dalle altre.
+- **Gestione**: dalla libreria apri `Liste` per creare, rinominare ed eliminare
+  le liste personali e vedere quanti titoli contengono. La lista predefinita non
+  può essere rinominata né eliminata.
+- **Filtro**: i chip sopra la libreria filtrano i titoli per lista, oltre che per
+  stato e testo.
+- **Aggiunta**: nella ricerca e nella scheda del titolo puoi scegliere la lista
+  di destinazione; se non ne scegli una, il titolo va in `Da vedere`. La ricerca
+  offre anche un'azione rapida `Aggiungi a lista`.
+- **Stasera e Sorprendimi**: nel foglio della serata puoi selezionare una o più
+  liste, oppure lasciare `Tutte le liste`. Le proposte e il titolo estratto da
+  `Sorprendimi` vengono scelti solo tra i titoli di quelle liste.
+- **Modifica**: il foglio di modifica di un titolo permette di cambiare le liste
+  a cui appartiene senza toccare stato, voto, note o tag.
+- **Eliminazione di una lista**: i titoli che erano solo in quella lista non
+  vengono persi: tornano nella lista predefinita `Da vedere`.
+- **Backup**: liste e appartenenze sono incluse nell'export JSON.
 
 ## Stack
 
@@ -283,7 +315,7 @@ Widget → provider Riverpod → use case → repository → Drift / TMDB
 - I **repository Drift** implementano le interfacce di dominio; il database Web
   usa `WasmDatabase.open`, `web/sqlite3.wasm` e `web/drift_worker.js`, con i dati
   in IndexedDB. Su mobile/desktop il database è un file locale.
-- La **cache TMDB** (`cached_entries`, schema v2) riusa le risposte e permette
+- La **cache TMDB** (`cached_entries`, schema v4) riusa le risposte e permette
   al dettaglio di mostrare i metadati salvati quando la rete non è disponibile.
 - Le **immagini** usano `cached_network_image`; senza rete la libreria resta
   consultabile anche se le copertine non ancora in cache possono mancare.
@@ -323,14 +355,21 @@ Il database Drift contiene:
 
 - `media_items` — metadati TMDB o mock;
 - `library_entries` — stato, voto, note, tag, episodio corrente, date;
+- `library_lists` — liste personali, con la lista predefinita `Da vedere`;
+- `library_list_entries` — appartenenza molti-a-molti tra titoli e liste;
 - `viewing_events` — cronologia delle azioni di visione;
 - `user_preferences` — onboarding, tema, generi, esclusioni;
 - `dismissed_suggestions` — scarti usati nelle proposte;
-- `cached_entries` — cache delle risposte TMDB (schema v2).
+- `cached_entries` — cache delle risposte TMDB.
 
-La migrazione da v1 a v2 crea la cache senza perdere i dati utente. Su Web la
-persistenza è in IndexedDB e sopravvive al refresh della pagina; su
-mobile/desktop è un file SQLite nella directory dei documenti dell'app.
+La migrazione da v1 a v2 crea la cache senza perdere i dati utente. La migrazione
+da v2 a v3 crea le liste, inserisce `Da vedere` e assegna ad essa tutte le voci
+già presenti, così nessun titolo resta fuori da una lista. La migrazione v4 è
+riparatrice: ricrea le tabelle delle liste mancanti e riassegna i titoli orfani
+alla lista predefinita, anche nei database che erano già marcati come v3 ma non
+avevano ancora completato la creazione dello schema. Su Web la persistenza è in
+IndexedDB e sopravvive al refresh della pagina; su mobile/desktop è un file SQLite
+nella directory dei documenti dell'app.
 
 ### Perché la porta conta sul Web
 
@@ -354,12 +393,13 @@ Per verificare: DevTools → Application → IndexedDB → `http://localhost:808
 quella porta (`SCENA_WEB_PORT=46615 tool/run_web.sh ...`) e poi esportare il
 backup.
 
-L'export produce un JSON versionato (`format: "scena-backup"`, `version: 1`) con
-libreria, metadati, eventi, preferenze e scarti. Sul Web il download avviene dal
-browser; su native il file viene salvato nella directory dei documenti. L'import
-legge il JSON incollato nell'app, valida formato e versione, e sostituisce i dati
-utente in una transazione. La cancellazione completa rimuove tutti i dati locali
-e richiede conferma esplicita.
+L'export produce un JSON versionato (`format: "scena-backup"`, `version: 2`) con
+libreria, liste e appartenenze, metadati, eventi, preferenze e scarti. Sul Web il
+download avviene dal browser; su native il file viene salvato nella directory dei
+documenti. L'import legge il JSON incollato nell'app, valida formato e versione, e
+sostituisce i dati utente in una transazione. I backup `version: 1`, privi di
+liste, restano importabili: i titoli vengono assegnati a `Da vedere`. La
+cancellazione completa rimuove tutti i dati locali e richiede conferma esplicita.
 
 ## Deep link e PWA
 
@@ -393,14 +433,15 @@ La suite copre dominio, dati e interfaccia:
 flutter test
 ```
 
-Sono presenti 65 test:
+Sono presenti 75 test:
 
 - **Dominio**: vincoli della serata, generi, durate, scarti, determinismo,
-  episodi, esclusioni assolute, use case di libreria, sorpresa.
-- **Dati**: CRUD della libreria, preferenze, eventi, scarti, backup, cache e
-  riapertura del database su file.
+  episodi, esclusioni assolute, filtro per liste, use case di libreria, sorpresa.
+- **Dati**: CRUD della libreria, liste e appartenenze, preferenze, eventi,
+  scarti, backup, cache e riapertura del database su file.
 - **Widget**: onboarding, shell compatta/espansa, home e azioni sulle proposte,
-  filtri e ricerca in libreria, editor, ricerca TMDB, impostazioni e deep link.
+  filtri e ricerca in libreria, filtro per lista, editor, ricerca TMDB con lista
+  di destinazione, impostazioni e deep link.
 
 I test non richiedono rete né chiavi TMDB: usano un catalogo finto e un database
 in memoria. Per lo sviluppo manuale offline usare `USE_MOCK_TMDB=true`.

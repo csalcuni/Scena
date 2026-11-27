@@ -10,6 +10,7 @@ import '../../domain/entities/enums.dart';
 import '../../domain/entities/library_entry.dart';
 import '../../widgets/confirm_dialog.dart';
 import '../../widgets/media_artwork.dart';
+import 'list_dialogs.dart';
 
 Future<void> showLibraryEditor(
   BuildContext context,
@@ -41,6 +42,7 @@ class _LibraryEntryEditorState extends ConsumerState<_LibraryEntryEditor> {
   late final TextEditingController _episode;
   late LibraryStatus _status;
   late int _rating;
+  late Set<int> _listIds;
   var _busy = false;
 
   bool get _isTv => widget.item.media.mediaType == MediaType.tv;
@@ -51,6 +53,7 @@ class _LibraryEntryEditorState extends ConsumerState<_LibraryEntryEditor> {
     final entry = widget.item.entry;
     _status = entry.status;
     _rating = entry.personalRating ?? 0;
+    _listIds = {...entry.listIds};
     _note = TextEditingController(text: entry.personalNote ?? '');
     _tags = TextEditingController(text: entry.tags.join(', '));
     _season = TextEditingController(
@@ -108,6 +111,9 @@ class _LibraryEntryEditorState extends ConsumerState<_LibraryEntryEditor> {
             currentSeason: _isTv ? (season ?? current.currentSeason) : null,
             currentEpisode: _isTv ? (episode ?? current.currentEpisode) : null,
           );
+      await ref
+          .read(libraryListRepositoryProvider)
+          .setEntryLists(entry.id, _listIds);
       if (!mounted) return;
       Navigator.of(context).pop();
       showScenaSnackBar(context, 'Voce aggiornata.');
@@ -143,10 +149,17 @@ class _LibraryEntryEditorState extends ConsumerState<_LibraryEntryEditor> {
     }
   }
 
+  Future<void> _createList() async {
+    final list = await createLibraryList(context, ref);
+    if (list == null || !mounted) return;
+    setState(() => _listIds.add(list.id));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final item = widget.item;
+    final lists = ref.watch(libraryListsProvider).value ?? const [];
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -279,6 +292,44 @@ class _LibraryEntryEditorState extends ConsumerState<_LibraryEntryEditor> {
                     ],
                   ),
                 ],
+                const SizedBox(height: 20),
+                Text('Liste', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Un titolo può stare in più liste. Se non ne selezioni '
+                  'nessuna, resta in «Da vedere».',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final list in lists)
+                      FilterChip(
+                        label: Text(
+                          list.isDefault
+                              ? '${list.name} (predefinita)'
+                              : list.name,
+                        ),
+                        selected: _listIds.contains(list.id),
+                        onSelected: (selected) => setState(() {
+                          if (selected) {
+                            _listIds.add(list.id);
+                          } else {
+                            _listIds.remove(list.id);
+                          }
+                        }),
+                      ),
+                    ActionChip(
+                      avatar: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('Nuova lista'),
+                      onPressed: _busy ? null : _createList,
+                    ),
+                  ],
+                ),
                 if (_isTv) ...[
                   const SizedBox(height: 18),
                   Text(

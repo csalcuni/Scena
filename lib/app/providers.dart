@@ -4,6 +4,7 @@ import '../core/config/app_config.dart';
 import '../data/local/drift/app_database.dart';
 import '../data/local/repositories/drift_backup_repository.dart';
 import '../data/local/repositories/drift_cache_store.dart';
+import '../data/local/repositories/drift_library_list_repository.dart';
 import '../data/local/repositories/drift_library_repository.dart';
 import '../data/local/repositories/drift_preferences_repository.dart';
 import '../data/tmdb/datasources/tmdb_api_client.dart';
@@ -13,12 +14,15 @@ import '../domain/entities/dismissed_suggestion.dart';
 import '../domain/entities/enums.dart';
 import '../domain/entities/evening.dart';
 import '../domain/entities/library_entry.dart';
+import '../domain/entities/library_list.dart';
 import '../domain/entities/media_item.dart';
 import '../domain/entities/user_preferences.dart';
 import '../domain/repositories/backup_repository.dart';
 import '../domain/repositories/library_repository.dart';
+import '../domain/repositories/library_list_repository.dart';
 import '../domain/repositories/media_repository.dart';
 import '../domain/repositories/preferences_repository.dart';
+import '../domain/usecases/library_scope.dart';
 import '../domain/usecases/library_usecases.dart';
 import '../domain/usecases/recommendation_engine.dart';
 import '../domain/usecases/surprise_picker.dart';
@@ -33,6 +37,16 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
   return DriftLibraryRepository(ref.watch(databaseProvider));
+});
+
+final libraryListRepositoryProvider = Provider<LibraryListRepository>((ref) {
+  return DriftLibraryListRepository(ref.watch(databaseProvider));
+});
+
+final libraryListsProvider = StreamProvider<List<LibraryList>>((ref) async* {
+  final repository = ref.watch(libraryListRepositoryProvider);
+  await repository.ensureDefault();
+  yield* repository.watchAll();
 });
 
 final viewingEventRepositoryProvider = Provider<ViewingEventRepository>((ref) {
@@ -222,6 +236,11 @@ class EveningRequestController extends Notifier<EveningRequest> {
 
   void setRequest(EveningRequest request) => state = request;
 
+  void removeList(int listId) {
+    if (!state.listIds.contains(listId)) return;
+    state = state.copyWith(listIds: {...state.listIds}..remove(listId));
+  }
+
   void reset() {
     final preferred = ref
         .read(preferencesProvider)
@@ -237,9 +256,22 @@ final eveningRequestProvider =
 );
 
 final recommendationProvider = Provider<RecommendationResult>((ref) {
+  final request = ref.watch(eveningRequestProvider);
+  final library = ref.watch(libraryProvider).value ?? const [];
+  final scoped = entriesInLists(library, request.listIds);
+
+  if (library.isNotEmpty && scoped.isEmpty) {
+    return const RecommendationResult(
+      suggestions: [],
+      relaxationNote:
+          'Nessun titolo appartiene alle liste scelte. Seleziona altre liste '
+          'o riporta la serata su tutte le liste.',
+    );
+  }
+
   return ref.watch(recommendationEngineProvider).recommend(
-        request: ref.watch(eveningRequestProvider),
-        library: ref.watch(libraryProvider).value ?? const [],
+        request: request,
+        library: scoped,
         preferences: ref.watch(preferencesProvider).value ??
             const UserPreferences(),
         dismissals:
@@ -274,10 +306,20 @@ class SurpriseController extends Notifier<SurpriseState> {
         ref.read(preferencesProvider).value ?? const UserPreferences();
     final request = ref.read(eveningRequestProvider);
     final picker = ref.read(surprisePickerProvider);
+    final scoped = entriesInLists(library, request.listIds);
+
+    if (library.isNotEmpty && scoped.isEmpty) {
+      return const SurprisePick(
+        candidate: null,
+        reason:
+            'Nessun titolo appartiene alle liste scelte per la serata.',
+        exhausted: true,
+      );
+    }
 
     var excluded = state.excludedKeys;
     var pick = picker.pick(
-      library: library,
+      library: scoped,
       request: request,
       preferences: preferences,
       excludedKeys: excluded,
@@ -288,7 +330,7 @@ class SurpriseController extends Notifier<SurpriseState> {
     if (pick.exhausted && excluded.isNotEmpty) {
       excluded = const {};
       pick = picker.pick(
-        library: library,
+        library: scoped,
         request: request,
         preferences: preferences,
       );

@@ -11,6 +11,7 @@ class LibraryEntry {
     this.personalRating,
     this.personalNote,
     this.tags = const [],
+    this.listIds = const {},
     this.currentSeason,
     this.currentEpisode,
     required this.lastActivityAt,
@@ -24,6 +25,10 @@ class LibraryEntry {
   final int? personalRating;
   final String? personalNote;
   final List<String> tags;
+
+  /// Liste personali a cui appartiene il titolo. Un titolo può stare in più
+  /// liste; l'insieme vuoto indica dati non ancora caricati.
+  final Set<int> listIds;
 
   /// Per le serie indica il prossimo episodio da guardare (non l'ultimo visto).
   final int? currentSeason;
@@ -47,6 +52,7 @@ class LibraryEntry {
     String? personalNote,
     bool clearNote = false,
     List<String>? tags,
+    Set<int>? listIds,
     int? currentSeason,
     int? currentEpisode,
     DateTime? lastActivityAt,
@@ -61,6 +67,7 @@ class LibraryEntry {
           clearRating ? null : (personalRating ?? this.personalRating),
       personalNote: clearNote ? null : (personalNote ?? this.personalNote),
       tags: tags ?? this.tags,
+      listIds: listIds ?? this.listIds,
       currentSeason: currentSeason ?? this.currentSeason,
       currentEpisode: currentEpisode ?? this.currentEpisode,
       lastActivityAt: lastActivityAt ?? this.lastActivityAt,
